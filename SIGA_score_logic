@@ -1,0 +1,87 @@
+def calculate_siga_score(player_tracking_df):
+    """
+    Calculate SIGA Score (0-100) for a player
+    Secondary In-Game Athleticism
+    """
+    
+    if player_tracking_df.empty:
+        return None
+    
+    # =================================================================
+    # COMPONENT 1: MAX SPEED (30 points)
+    # =================================================================
+    max_speed_yps = player_tracking_df['s'].max()
+    max_speed_mph = max_speed_yps * 2.045
+    
+    # Scale: 15 MPH = 0, 22 MPH = 30
+    speed_score = min(30, max(0, (max_speed_mph - 15) / (22 - 15) * 30))
+    
+    # =================================================================
+    # COMPONENT 2: BURST POWER (25 points)
+    # =================================================================
+    max_accel = player_tracking_df['a'].max()
+    
+    # Scale: 3.0 = 0, 8.0 = 25
+    burst_score = min(25, max(0, (max_accel - 3.0) / (8.0 - 3.0) * 25))
+    
+    # =================================================================
+    # COMPONENT 3: SPEED CONSISTENCY (15 points)
+    # =================================================================
+    speed_threshold = 0.70 * max_speed_yps
+    high_speed_pct = (player_tracking_df['s'] >= speed_threshold).mean() * 100
+    
+    # Scale: 10% = 0, 40% = 15
+    consistency_score = min(15, max(0, (high_speed_pct - 10) / (40 - 10) * 15))
+    
+    # =================================================================
+    # COMPONENT 4: EXPLOSIVENESS (15 points)
+    # =================================================================
+    burst_threshold = 3.0  # yds/s²
+    burst_count = (player_tracking_df['a'] > burst_threshold).sum()
+    total_frames = len(player_tracking_df)
+    bursts_per_100 = (burst_count / total_frames) * 100 if total_frames > 0 else 0
+    
+    # Scale: 2 per 100 = 0, 10 per 100 = 15
+    explosive_score = min(15, max(0, (bursts_per_100 - 2) / (10 - 2) * 15))
+    
+    # =================================================================
+    # COMPONENT 5: AGILITY (10 points)
+    # =================================================================
+    if 'dir' in player_tracking_df.columns:
+        dir_changes = player_tracking_df['dir'].diff().abs()
+        # Account for 360° wraparound
+        dir_changes = dir_changes.apply(lambda x: min(x, 360 - x) if pd.notna(x) else 0)
+        # Count significant changes while moving fast
+        fast_mask = player_tracking_df['s'] > 5.0
+        agile_moves = ((dir_changes > 45) & fast_mask).sum()
+        agility_per_100 = (agile_moves / total_frames) * 100 if total_frames > 0 else 0
+        
+        # Scale: 1 per 100 = 0, 6 per 100 = 10
+        agility_score = min(10, max(0, (agility_per_100 - 1) / (6 - 1) * 10))
+    else:
+        agility_score = 5  # Default to average if no direction data
+    
+    # =================================================================
+    # COMPONENT 6: VERTICALITY (5 points)
+    # =================================================================
+    if 'z' in player_tracking_df.columns:
+        z_range = player_tracking_df['z'].max() - player_tracking_df['z'].min()
+        
+        # Scale: 0.5 ft = 0, 3.0 ft = 5
+        vertical_score = min(5, max(0, (z_range - 0.5) / (3.0 - 0.5) * 5))
+    else:
+        vertical_score = 2.5  # Default to average if no z data
+    
+    # =================================================================
+    # TOTAL SIGA SCORE
+    # =================================================================
+    siga_score = int(round(
+        speed_score + 
+        burst_score + 
+        consistency_score + 
+        explosive_score + 
+        agility_score + 
+        vertical_score
+    ))
+    
+    return siga_score
